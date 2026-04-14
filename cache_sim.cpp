@@ -173,6 +173,9 @@ int main(int argc, char* argv[]) {
     l2_assoc   = atoi(argv[6]);
   }
 
+  // EC features only active when extra args are provided
+  bool ec_mode = (argc > 4);
+
   Cache l1(l1_entries, l1_assoc, block_size);
 
   Cache* l2 = NULL;
@@ -180,10 +183,10 @@ int main(int argc, char* argv[]) {
     l2 = new Cache(l2_entries, l2_assoc, block_size);
 
   // Fully-associative shadow cache (same size as L1) for miss classification
-  Cache fa_shadow(l1_entries, l1_entries, block_size);
-
-  // Track all block addresses seen so far for compulsory detection
+  Cache* fa_shadow = NULL;
   set<int> seen_blocks;
+  if (ec_mode)
+    fa_shadow = new Cache(l1_entries, l1_entries, block_size);
 
   ifstream input;
   input.open(input_filename);
@@ -200,17 +203,28 @@ int main(int argc, char* argv[]) {
     int block_addr = addr / block_size;
 
     bool l1_hit = l1.hit(addr);
-    bool fa_hit = fa_shadow.hit(addr);
-    bool is_new = (seen_blocks.find(block_addr) == seen_blocks.end());
+
+    // EC: check shadow cache before updating
+    bool fa_hit = false;
+    bool is_new = false;
+    if (ec_mode) {
+      fa_hit = fa_shadow->hit(addr);
+      is_new = (seen_blocks.find(block_addr) == seen_blocks.end());
+    }
 
     l1.access(addr);
-    fa_shadow.access(addr);
-    seen_blocks.insert(block_addr);
+    if (ec_mode) {
+      fa_shadow->access(addr);
+      seen_blocks.insert(block_addr);
+    }
 
     if (l1_hit) {
       output << addr << " : HIT" << endl;
+    } else if (!ec_mode) {
+      // Base mode: exact format for grading
+      output << addr << " : MISS" << endl;
     } else {
-      // Classify miss
+      // EC mode: classify miss
       string miss_type;
       if (is_new)
         miss_type = "compulsory";
@@ -235,6 +249,8 @@ int main(int argc, char* argv[]) {
 
   if (l2 != NULL)
     delete l2;
+  if (fa_shadow != NULL)
+    delete fa_shadow;
 
   return 0;
 }
